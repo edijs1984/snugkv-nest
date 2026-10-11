@@ -267,4 +267,4 @@ Tests that need a server are skipped when `SNUGKV_BIN` is not set.
 
 ## License
 
-MIT
+MIT. This package is only a client. The SnugKV server it talks to is a separate project, licensed under AGPL-3.0 with a commercial licence option.
