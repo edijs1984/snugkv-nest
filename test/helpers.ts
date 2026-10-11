@@ -44,9 +44,10 @@ async function waitPort(port: number, ms = 10_000): Promise<void> {
 export async function startServer(opts: { dir?: string; port?: number } = {}): Promise<TestServer> {
   const dir = opts.dir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'snugkv-nest-'));
   const port = opts.port ?? (await freePort());
+  const adminPort = await freePort();
   const proc: ChildProcess = spawn(
     SNUGKV_BIN,
-    ['-listen', `127.0.0.1:${port}`, '-aof', path.join(dir, 'a.aof'), '-fsync', 'always', '-stream-dir', path.join(dir, 'streams')],
+    ['-listen', `127.0.0.1:${port}`, '-admin-listen', `127.0.0.1:${adminPort}`, '-aof', path.join(dir, 'a.aof'), '-fsync', 'always', '-stream-dir', path.join(dir, 'streams')],
     { stdio: 'ignore' },
   );
   const exited = new Promise<void>((resolve) => proc.once('exit', () => resolve()));

@@ -1,6 +1,7 @@
 import { hostname } from 'node:os';
 import { SnugKvClient, SnugKvClientOptions } from './client';
 import { Consumer, MessageHandler, SubscribeOptions, ConsumerStats } from './consumer';
+import { SnugKvSubscriber } from './pubsub';
 import { PresenceOptions, PresenceReporter } from './presence';
 import { BatchMessage, jsonSerializer, PublishOptions, Publisher, Serializer } from './publisher';
 import { BusLogger, consoleLogger, uuid } from './util';
@@ -42,6 +43,7 @@ export class SnugKvBus {
   private readonly logger: BusLogger;
   private readonly keyPrefix: string;
   private closed = false;
+  private pubsub?: SnugKvSubscriber;
 
   constructor(private readonly options: SnugKvBusOptions) {
     if (!options.service) throw new Error('snugkv: "service" is required');
@@ -113,6 +115,12 @@ export class SnugKvBus {
     };
   }
 
+  /** Shared pub/sub subscriber (own connection, opened on first use, closed with the bus). */
+  subscriber(): SnugKvSubscriber {
+    this.pubsub ??= this.client.subscriber();
+    return this.pubsub;
+  }
+
   stats(): { published: Record<string, number>; consumers: ConsumerStats[] } {
     return { published: this.publisher.stats(), consumers: this.consumers.map((c) => c.stats()) };
   }
@@ -123,6 +131,7 @@ export class SnugKvBus {
     this.closed = true;
     await Promise.allSettled(this.consumers.splice(0).map((c) => c.stop()));
     await this.presence?.stop();
+    this.pubsub?.close();
     this.client.close();
   }
 }

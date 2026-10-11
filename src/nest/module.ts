@@ -1,12 +1,24 @@
 import { DynamicModule, InjectionToken, Logger, Module, ModuleMetadata, OptionalFactoryDependency, Provider } from '@nestjs/common';
 import { DiscoveryModule } from '@nestjs/core';
 import { SnugKvBus, SnugKvBusOptions } from '../core/bus';
+import { CacheOptions, SnugKvCache } from '../core/cache';
 import { SnugKvClient } from '../core/client';
+import { SnugKvLocks } from '../core/lock';
+import { SnugKvSubscriber } from '../core/pubsub';
+import { SnugKvRateLimiter } from '../core/ratelimit';
 import { BusLogger } from '../core/util';
 import { SnugKvRuntime } from './runtime';
 import { SNUG_OPTIONS } from './tokens';
 
-export interface SnugKvModuleOptions extends SnugKvBusOptions {
+export interface SnugKvModuleOptions extends Omit<SnugKvBusOptions, 'service'> {
+  /** Name of this app. Needed for messaging (default consumer group); defaults to `app`. */
+  service?: string;
+  /** Settings for the injectable {@link SnugKvCache}. */
+  cache?: CacheOptions;
+  /** Key prefix for {@link SnugKvLocks} (default `lock:`). */
+  lockPrefix?: string;
+  /** Key prefix for {@link SnugKvRateLimiter} (default `rl:`). */
+  rateLimitPrefix?: string;
   /** Make the module global (default true). */
   isGlobal?: boolean;
   /** Start consumers for `@SnugSubscribe` methods automatically (default true). */
@@ -33,14 +45,32 @@ const sharedProviders: Provider[] = [
   {
     provide: SnugKvBus,
     useFactory: (options: SnugKvModuleOptions) => {
-      const { isGlobal, autoSubscribe, ...bus } = options;
-      return new SnugKvBus({ logger: nestLogger(), ...bus });
+      const { isGlobal, autoSubscribe, cache, lockPrefix, rateLimitPrefix, service, ...bus } = options;
+      return new SnugKvBus({ logger: nestLogger(), service: service ?? 'app', ...bus });
     },
     inject: [SNUG_OPTIONS],
   },
   { provide: SnugKvClient, useFactory: (bus: SnugKvBus) => bus.client, inject: [SnugKvBus] },
+  { provide: SnugKvSubscriber, useFactory: (bus: SnugKvBus) => bus.subscriber(), inject: [SnugKvBus] },
+  {
+    provide: SnugKvCache,
+    useFactory: (client: SnugKvClient, o: SnugKvModuleOptions) => new SnugKvCache(client, o.cache),
+    inject: [SnugKvClient, SNUG_OPTIONS],
+  },
+  {
+    provide: SnugKvLocks,
+    useFactory: (client: SnugKvClient, o: SnugKvModuleOptions) => new SnugKvLocks(client, o.lockPrefix),
+    inject: [SnugKvClient, SNUG_OPTIONS],
+  },
+  {
+    provide: SnugKvRateLimiter,
+    useFactory: (client: SnugKvClient, o: SnugKvModuleOptions) => new SnugKvRateLimiter(client, o.rateLimitPrefix),
+    inject: [SnugKvClient, SNUG_OPTIONS],
+  },
   SnugKvRuntime,
 ];
+
+const exported = [SnugKvBus, SnugKvClient, SnugKvSubscriber, SnugKvCache, SnugKvLocks, SnugKvRateLimiter];
 
 @Module({})
 export class SnugKvModule {
@@ -50,7 +80,7 @@ export class SnugKvModule {
       global: options.isGlobal ?? true,
       imports: [DiscoveryModule],
       providers: [{ provide: SNUG_OPTIONS, useValue: options }, ...sharedProviders],
-      exports: [SnugKvBus, SnugKvClient],
+      exports: exported,
     };
   }
 
@@ -60,7 +90,7 @@ export class SnugKvModule {
       global: options.isGlobal ?? true,
       imports: [DiscoveryModule, ...(options.imports ?? [])],
       providers: [{ provide: SNUG_OPTIONS, useFactory: options.useFactory, inject: options.inject ?? [] }, ...sharedProviders],
-      exports: [SnugKvBus, SnugKvClient],
+      exports: exported,
     };
   }
 }

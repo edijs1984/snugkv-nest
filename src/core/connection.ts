@@ -57,6 +57,8 @@ export class Connection extends EventEmitter {
   private state: State = 'idle';
   private attempt = 0;
   private retryTimer: NodeJS.Timeout | null = null;
+  /** Receives replies that arrive with no command waiting (pub/sub pushes and confirmations). */
+  pushHandler: ((reply: Reply) => void) | null = null;
   private readyWaiters: Array<{ resolve: () => void; reject: (e: Error) => void }> = [];
   private readonly opts: Required<Pick<ConnectionOptions, 'connectTimeoutMs' | 'reconnect' | 'retryMinMs' | 'retryMaxMs' | 'keepAliveMs' | 'offlineQueue'>> &
     ConnectionOptions;
@@ -108,6 +110,11 @@ export class Connection extends EventEmitter {
 
   send(args: Arg[]): Promise<Reply> {
     return this.enqueue([args], false) as Promise<Reply>;
+  }
+
+  /** Writes a command whose replies arrive through `pushHandler` (SUBSCRIBE and friends). Dropped when not connected. */
+  sendNoReply(args: Arg[]): void {
+    if (this.state === 'ready' && this.socket) this.socket.write(encodeCommand(args));
   }
 
   /** Sends several commands in one write. Error replies come back as RespError values. */
@@ -237,7 +244,10 @@ export class Connection extends EventEmitter {
     try {
       this.parser.push(chunk, (reply) => {
         const p = this.inflight.shift();
-        if (!p) return; // unsolicited data; ignore
+        if (!p) {
+          if (this.pushHandler) this.pushHandler(reply);
+          return;
+        }
         if (reply instanceof RespError) p.reject(reply);
         else p.resolve(reply);
       });

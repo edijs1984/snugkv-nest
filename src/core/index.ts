@@ -6,3 +6,8 @@ export * from './publisher';
 export * from './consumer';
 export * from './bus';
 export { BusLogger, parseUrl } from './util';
+export * from './pubsub';
+export * from './tx';
+export * from './cache';
+export * from './lock';
+export * from './ratelimit';

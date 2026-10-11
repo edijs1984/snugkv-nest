@@ -1,6 +1,9 @@
 # snugkv-nest
 
-A message bus for NestJS microservices, built on [SnugKV](https://github.com/edijs1984/snugkv) streams.
+The NestJS module and TypeScript client for [SnugKV](https://github.com/edijs1984/snugkv): strings, hashes, lists, sets, sorted sets, expiry, Lua, pub/sub and transactions, plus cache, lock and rate-limit helpers and a durable message bus on streams.
+
+- [Using SnugKV as a data store](#using-snugkv-as-a-data-store)
+- [Messaging (streams)](#messaging-streams)
 
 - **Durable topics.** Messages are stream entries. They survive restarts and are replayable.
 - **Consumer groups.** Instances of one service share the work; every different service gets every message.
@@ -17,6 +20,82 @@ npm install snugkv-nest
 ```
 
 Needs Node 18+ and NestJS 10 or 11.
+
+## Using SnugKV as a data store
+
+Import the module once; everything below can be injected.
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { SnugKvCache, SnugKvClient, SnugKvLocks, SnugKvModule, SnugKvRateLimiter, SnugKvSubscriber } from 'snugkv-nest';
+
+// app.module.ts
+@Module({ imports: [SnugKvModule.forRoot({ url: process.env.SNUGKV_URL, cache: { prefix: 'app:', ttlSeconds: 120 } })] })
+export class AppModule {}
+
+@Injectable()
+export class UsersService {
+  constructor(
+    private readonly kv: SnugKvClient,
+    private readonly cache: SnugKvCache,
+    private readonly locks: SnugKvLocks,
+    private readonly limiter: SnugKvRateLimiter,
+    private readonly pubsub: SnugKvSubscriber,
+  ) {}
+
+  profile(id: string) {
+    return this.cache.wrap(`user:${id}`, () => this.loadFromDb(id)); // loader runs once, result cached 120 s
+  }
+
+  async rebuild() {
+    const r = await this.locks.run('rebuild', () => this.doRebuild(), { ttlMs: 60_000 });
+    return r.acquired;
+  }
+
+  async allow(ip: string) {
+    return (await this.limiter.hit(ip, 100, 60_000)).allowed; // 100 per minute
+  }
+}
+```
+
+`service` is only needed for messaging; without it the module uses `app`. Outside Nest, use `new SnugKvClient({ url })` from `snugkv-nest/core`.
+
+### Client
+
+```ts
+await kv.set('a', '1');  await kv.setOpts('a', '1', { nx: true, exSeconds: 30 });
+await kv.incr('visits');  await kv.setJson('cfg', { a: 1 });  await kv.getJson('cfg');
+await kv.hset('user:1', { name: 'Ann', age: 31 });  await kv.hgetall('user:1');
+await kv.rpush('queue', 'a', 'b');  await kv.lrange('queue');
+await kv.sadd('tags', 'x', 'y');  await kv.smembers('tags');
+await kv.zadd('board', [{ member: 'ann', score: 10 }]);  await kv.zrange('board', 0, 9, { reverse: true });
+await kv.expire('a', 60);  await kv.ttl('a');
+for await (const key of kv.scanIterator({ match: 'user:*' })) { /* … */ }
+await kv.eval("return redis.call('get', KEYS[1])", ['a']);
+await kv.tx().set('a', '1').incr('n').hset('h', { f: 1 }).exec(); // MULTI/EXEC in one write
+await kv.call('ANYTHING', 'else');                                 // raw command
+```
+
+### Pub/sub
+
+Fire-and-forget broadcast. Use the streams below when a message must not be lost.
+
+```ts
+const off = await pubsub.subscribe('news', (message, channel) => console.log(channel, message));
+await pubsub.psubscribe('events.*', (message, channel, pattern) => { /* … */ });
+await kv.publish('news', 'hello');
+await off();
+```
+
+Subscriptions are restored after a reconnect; messages sent while disconnected are not replayed.
+
+### Cache, locks, rate limits
+
+- `SnugKvCache`: `get`, `set`, `del`, `wrap(key, loader, ttl)` (concurrent callers share one load), `clear(pattern)`.
+- `SnugKvLocks`: `acquire(name, { ttlMs, waitMs })`, `run(name, fn)`. A lock expires on its own, and only its holder can release or extend it. It protects against crashed holders, not against the server itself failing, so keep critical sections idempotent.
+- `SnugKvRateLimiter`: `hit(key, limit, windowMs)` is a fixed window; it returns `{ allowed, count, remaining, resetMs }`.
+
+## Messaging (streams)
 
 ## Quick start
 

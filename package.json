@@ -1,23 +1,59 @@
 {
   "name": "snugkv-nest",
-  "version": "0.1.0",
-  "description": "NestJS message bus on SnugKV streams: durable topics, consumer groups, retries, dead letters.",
-  "keywords": ["nestjs", "snugkv", "redis", "streams", "message-bus", "microservices", "consumer-group"],
+  "version": "0.2.0",
+  "description": "NestJS module and TypeScript client for SnugKV: data types, cache, locks, rate limits, pub/sub, transactions and a durable stream message bus.",
+  "keywords": [
+    "nestjs",
+    "snugkv",
+    "redis",
+    "client",
+    "cache",
+    "lock",
+    "rate-limit",
+    "pubsub",
+    "streams",
+    "message-bus",
+    "microservices",
+    "consumer-group"
+  ],
   "license": "MIT",
   "author": "Edijs Ziedins",
-  "repository": { "type": "git", "url": "git+https://github.com/edijs1984/snugkv-nest.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/edijs1984/snugkv-nest.git"
+  },
   "homepage": "https://github.com/edijs1984/snugkv-nest#readme",
-  "bugs": { "url": "https://github.com/edijs1984/snugkv-nest/issues" },
+  "bugs": {
+    "url": "https://github.com/edijs1984/snugkv-nest/issues"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./core": { "types": "./dist/core/index.d.ts", "default": "./dist/core/index.js" },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "default": "./dist/core/index.js"
+    },
     "./package.json": "./package.json"
   },
-  "typesVersions": { "*": { "core": ["dist/core/index.d.ts"] } },
-  "files": ["dist", "README.md", "LICENSE"],
-  "engines": { "node": ">=18" },
+  "typesVersions": {
+    "*": {
+      "core": [
+        "dist/core/index.d.ts"
+      ]
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json",
     "test": "rm -rf dist-test && tsc -p tsconfig.test.json && node --test --test-concurrency=1 dist-test/test/*.test.js",
