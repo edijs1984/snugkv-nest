@@ -59,3 +59,62 @@ test('each instance of the same class is found once', () => {
   const o = new Orders();
   assert.equal(collectSubscriptions([o, o]).length, 4);
 });
+
+import { OnSnugWorkerEvent, SnugProcess, SnugProcessor, WorkerHost } from '../src/nest/queue-decorators';
+import { collectProcessors } from '../src/nest/explorer';
+import { UnrecoverableError } from '../src/core/queue/types';
+
+const fakeJob = (name: string) => ({ name, id: '1' }) as never;
+
+@SnugProcessor('emails', { concurrency: 4 })
+class EmailProcessor extends WorkerHost {
+  events: unknown[] = [];
+  process(job: { name: string }) {
+    return `whole:${job.name}`;
+  }
+  @OnSnugWorkerEvent('completed')
+  done(job: unknown, result: unknown) {
+    this.events.push([job, result]);
+  }
+}
+
+@SnugProcessor('reports')
+class ReportProcessor {
+  @SnugProcess('daily')
+  daily() {
+    return 'daily';
+  }
+  @SnugProcess()
+  rest(job: { name: string }) {
+    return `rest:${job.name}`;
+  }
+}
+
+@SnugProcessor('strict')
+class StrictProcessor {
+  @SnugProcess('only')
+  only() {
+    return 1;
+  }
+}
+
+class NotAProcessor {}
+
+@SnugProcessor('broken')
+class Broken {}
+
+test('finds processors, routes jobs by name and wires worker events', async () => {
+  const email = new EmailProcessor();
+  const found = collectProcessors([email, new ReportProcessor(), new StrictProcessor(), new NotAProcessor(), email]);
+  assert.deepEqual(found.map((f) => f.meta.queue), ['emails', 'reports', 'strict']);
+  assert.equal(found[0]!.meta.options.concurrency, 4);
+  assert.equal(await found[0]!.processor(fakeJob('x'), 't'), 'whole:x');
+  assert.equal(await found[1]!.processor(fakeJob('daily'), 't'), 'daily');
+  assert.equal(await found[1]!.processor(fakeJob('other'), 't'), 'rest:other');
+  assert.equal(await found[2]!.processor(fakeJob('only'), 't'), 1);
+  assert.throws(() => found[2]!.processor(fakeJob('nope'), 't'), UnrecoverableError);
+  found[0]!.events[0]!.handler('job', 'result');
+  assert.deepEqual(email.events, [['job', 'result']]);
+  assert.equal(found[0]!.events[0]!.event, 'completed');
+  assert.throws(() => collectProcessors([new Broken()]), /no process\(\) method/);
+});

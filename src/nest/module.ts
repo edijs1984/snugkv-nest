@@ -4,6 +4,7 @@ import { SnugKvBus, SnugKvBusOptions } from '../core/bus';
 import { CacheOptions, SnugKvCache } from '../core/cache';
 import { SnugKvClient } from '../core/client';
 import { SnugKvLocks } from '../core/lock';
+import { FlowProducer } from '../core/queue/flow';
 import { SnugKvSubscriber } from '../core/pubsub';
 import { SnugKvRateLimiter } from '../core/ratelimit';
 import { BusLogger } from '../core/util';
@@ -23,6 +24,10 @@ export interface SnugKvModuleOptions extends Omit<SnugKvBusOptions, 'service'> {
   isGlobal?: boolean;
   /** Start consumers for `@SnugSubscribe` methods automatically (default true). */
   autoSubscribe?: boolean;
+  /** Start workers for `@SnugProcessor` classes automatically (default true). */
+  autoProcess?: boolean;
+  /** Key prefix for queues (default `snugq`). */
+  queuePrefix?: string;
 }
 
 export interface SnugKvModuleAsyncOptions extends Pick<ModuleMetadata, 'imports'> {
@@ -45,7 +50,7 @@ const sharedProviders: Provider[] = [
   {
     provide: SnugKvBus,
     useFactory: (options: SnugKvModuleOptions) => {
-      const { isGlobal, autoSubscribe, cache, lockPrefix, rateLimitPrefix, service, ...bus } = options;
+      const { isGlobal, autoSubscribe, autoProcess, queuePrefix, cache, lockPrefix, rateLimitPrefix, service, ...bus } = options;
       return new SnugKvBus({ logger: nestLogger(), service: service ?? 'app', ...bus });
     },
     inject: [SNUG_OPTIONS],
@@ -67,10 +72,15 @@ const sharedProviders: Provider[] = [
     useFactory: (client: SnugKvClient, o: SnugKvModuleOptions) => new SnugKvRateLimiter(client, o.rateLimitPrefix),
     inject: [SnugKvClient, SNUG_OPTIONS],
   },
+  {
+    provide: FlowProducer,
+    useFactory: (client: SnugKvClient, o: SnugKvModuleOptions) => new FlowProducer({ client, prefix: o.queuePrefix }),
+    inject: [SnugKvClient, SNUG_OPTIONS],
+  },
   SnugKvRuntime,
 ];
 
-const exported = [SnugKvBus, SnugKvClient, SnugKvSubscriber, SnugKvCache, SnugKvLocks, SnugKvRateLimiter];
+const exported = [SnugKvBus, SnugKvClient, SnugKvSubscriber, SnugKvCache, SnugKvLocks, SnugKvRateLimiter, FlowProducer];
 
 @Module({})
 export class SnugKvModule {

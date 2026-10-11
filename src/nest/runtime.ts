@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { DiscoveryService } from '@nestjs/core';
 import { SnugKvBus, Subscription } from '../core/bus';
-import { collectSubscriptions } from './explorer';
+import { Worker } from '../core/queue/worker';
+import { collectProcessors, collectSubscriptions } from './explorer';
 import { SNUG_OPTIONS } from './tokens';
 import type { SnugKvModuleOptions } from './module';
 
@@ -13,6 +14,7 @@ import type { SnugKvModuleOptions } from './module';
 export class SnugKvRuntime implements OnModuleInit, OnApplicationBootstrap, OnModuleDestroy {
   private readonly log = new Logger('SnugKV');
   private subscriptions: Subscription[] = [];
+  private workers: Worker[] = [];
 
   constructor(
     private readonly bus: SnugKvBus,
@@ -25,7 +27,6 @@ export class SnugKvRuntime implements OnModuleInit, OnApplicationBootstrap, OnMo
   }
 
   async onApplicationBootstrap(): Promise<void> {
-    if (this.options.autoSubscribe === false) return;
     const wrappers = [...this.discovery.getProviders(), ...this.discovery.getControllers()];
     const instances: object[] = [];
     for (const w of wrappers) {
@@ -37,6 +38,16 @@ export class SnugKvRuntime implements OnModuleInit, OnApplicationBootstrap, OnMo
       }
       instances.push(inst);
     }
+    if (this.options.autoProcess !== false) {
+      for (const p of collectProcessors(instances)) {
+        const worker = new Worker(p.meta.queue, p.processor, { ...p.meta.options, client: this.bus.client, prefix: this.options.queuePrefix });
+        worker.on('error', (e: Error) => this.log.warn(`worker ${p.meta.queue}: ${e.message}`));
+        for (const e of p.events) worker.on(e.event, (...args: unknown[]) => void Promise.resolve(e.handler(...args)).catch((err: Error) => this.log.warn(`${p.instance.constructor.name} ${e.event} handler: ${err.message}`)));
+        this.workers.push(worker);
+        this.log.log(`${p.instance.constructor.name} processes queue ${p.meta.queue} (concurrency ${p.meta.options.concurrency ?? 1})`);
+      }
+    }
+    if (this.options.autoSubscribe === false) return;
     for (const s of collectSubscriptions(instances)) {
       const sub = await this.bus.subscribe(s.meta, s.handler);
       this.subscriptions.push(sub);
@@ -45,6 +56,7 @@ export class SnugKvRuntime implements OnModuleInit, OnApplicationBootstrap, OnMo
   }
 
   async onModuleDestroy(): Promise<void> {
+    await Promise.allSettled(this.workers.splice(0).map((w) => w.close()));
     await this.bus.close();
     this.subscriptions = [];
   }
