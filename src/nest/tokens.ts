@@ -1,0 +1,1 @@
+export const SNUG_OPTIONS = 'SNUGKV_MODULE_OPTIONS';
