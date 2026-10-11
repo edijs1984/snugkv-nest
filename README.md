@@ -95,6 +95,43 @@ Subscriptions are restored after a reconnect; messages sent while disconnected a
 - `SnugKvLocks`: `acquire(name, { ttlMs, waitMs })`, `run(name, fn)`. A lock expires on its own, and only its holder can release or extend it. It protects against crashed holders, not against the server itself failing, so keep critical sections idempotent.
 - `SnugKvRateLimiter`: `hit(key, limit, windowMs)` is a fixed window; it returns `{ allowed, count, remaining, resetMs }`.
 
+## Job queues
+
+BullMQ-style queues that run inside SnugKV (the `snugq` function library, loaded by the server by default). Needs a server version that includes it.
+
+```ts
+import { Queue, Worker, QueueEvents, FlowProducer } from 'snugkv-nest';
+
+const emails = new Queue('emails', { connection: { host: '127.0.0.1', port: 6379 } });
+await emails.add('welcome', { to: 'a@b.c' }, { attempts: 3, backoff: { type: 'exponential', delay: 1000 }, removeOnComplete: 100 });
+
+const worker = new Worker('emails', async (job) => {
+  await job.updateProgress(50);
+  return send(job.data);
+}, { connection: { host: '127.0.0.1', port: 6379 }, concurrency: 5 });
+worker.on('failed', (job, err) => console.error(job.id, err.message));
+```
+
+With Nest, register queues and mark processors; workers start and stop with the app:
+
+```ts
+SnugKvQueueModule.registerQueue({ name: 'emails' })
+
+@SnugProcessor('emails', { concurrency: 5 })
+export class EmailProcessor extends WorkerHost {
+  async process(job: Job<{ to: string }>) { /* … */ }
+
+  @OnSnugWorkerEvent('failed')
+  onFailed(job: Job, err: Error) { /* … */ }
+}
+
+constructor(@InjectSnugQueue('emails') private readonly emails: Queue) {}
+```
+
+Use `@SnugProcess('jobName')` on methods instead of `process()` to route by job name.
+
+Supported: priorities, LIFO, delayed jobs, attempts with fixed, exponential or custom backoff (`UnrecoverableError` skips retries), locks with stalled-job recovery, pause/resume, global concurrency, queue rate limits (`limiter`, `queue.setRateLimit`, `worker.rateLimit` + `RateLimitError`), custom ids and deduplication, `removeOnComplete`/`removeOnFail`, progress and logs, `QueueEvents` and `job.waitUntilFinished`, `drain`/`clean`/`obliterate`/`retryJobs`/`promoteJobs`, repeatable jobs (`upsertJobScheduler` with `every` or a cron `pattern` and `tz`), and parent/child flows (`FlowProducer`, `job.getChildrenValues()`, `failParentOnFailure`, `ignoreDependencyOnFailure`). Job data must be JSON-serialisable. Cron patterns are computed by workers, so keep one running. See the server's `docs/QUEUES.md` for the storage layout.
+
 ## Messaging (streams)
 
 ## Quick start
