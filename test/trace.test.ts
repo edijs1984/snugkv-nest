@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { currentTrace, getTracer, setTracer, takeTrace, Tracer, TRACE_FIELD, withTrace } from '../src/core/trace';
+import * as http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { currentTrace, getTracer, parseTraceHeader, setTracer, takeTrace, traceHeader, Tracer, TRACE_FIELD, TRACE_HEADER, withTrace } from '../src/core/trace';
+import { instrumentHttpClient, maskPath, uninstrumentHttpClient } from '../src/core/trace-http';
 import type { Arg } from '../src/core/resp';
 
 /** Collects the XADD commands the tracer sends. */
@@ -122,5 +125,75 @@ describe('trace in job data', () => {
       await t.close();
     }
     assert.equal(getTracer(), undefined);
+  });
+});
+
+describe('outgoing HTTP calls', () => {
+  test('masks keys in paths and drops the query', () => {
+    assert.equal(maskPath('/v2/abcDEF1234567890xyz?token=1'), '/v2/…');
+    assert.equal(maskPath('/api/v2/push/send'), '/api/v2/push/send');
+    assert.equal(maskPath('/coins/ethereum/market_chart'), '/coins/ethereum/market_chart');
+  });
+
+  test('records http and fetch calls made inside a trace, not outside', async () => {
+    const server = http.createServer((req, res) => {
+      res.statusCode = req.url?.startsWith('/fail') ? 503 : 200;
+      res.end('ok');
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as AddressInfo).port;
+    const c = fakeClient();
+    const t = new Tracer(c as any, { service: 'api', flushMs: 60_000 });
+    setTracer(t);
+    instrumentHttpClient();
+    const get = (p: string) =>
+      new Promise<void>((resolve, reject) => {
+        http.get({ host: '127.0.0.1', port, path: p }, (res) => {
+          res.resume();
+          res.on('end', resolve);
+        }).on('error', reject);
+      });
+    try {
+      await get('/outside');
+      await t.step('job', {}, async () => {
+        await get('/v2/abcDEF1234567890xyz?key=secret');
+        await (await fetch(`http://127.0.0.1:${port}/fail`)).text();
+      });
+      await t.flush();
+      const spans = c.writes.map(fields);
+      const root = spans.find((s) => s.name === 'job')!;
+      const calls = spans.filter((s) => s.name.startsWith('HTTP '));
+      assert.equal(calls.length, 2, JSON.stringify(spans.map((s) => s.name)));
+      for (const s of calls) assert.equal(s.parentId, root.spanId);
+      assert.ok(calls.some((s) => JSON.parse(s.attrs!).path === '/v2/…'));
+      assert.ok(!JSON.stringify(spans).includes('secret'));
+      const failed = calls.find((s) => JSON.parse(s.attrs!).path === '/fail')!;
+      assert.equal(failed.status, 'error');
+      assert.equal(JSON.parse(failed.attrs!).statusCode, 503);
+    } finally {
+      uninstrumentHttpClient();
+      setTracer(undefined);
+      await t.close();
+      server.close();
+    }
+  });
+});
+
+describe('message headers', () => {
+  test('a trace survives the header round trip', async () => {
+    const c = fakeClient();
+    const t = new Tracer(c as any, { service: 'api', flushMs: 60_000 });
+    setTracer(t);
+    try {
+      assert.deepEqual(traceHeader(), {});
+      await t.step('webhook', {}, async () => {
+        const h = traceHeader();
+        assert.deepEqual(parseTraceHeader(h[TRACE_HEADER]), currentTrace());
+      });
+      assert.equal(parseTraceHeader('nonsense'), undefined);
+    } finally {
+      setTracer(undefined);
+      await t.close();
+    }
   });
 });

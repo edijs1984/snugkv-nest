@@ -1,3 +1,4 @@
+import { currentTrace, getTracer, traceHeader } from './trace';
 import { SnugKvClient } from './client';
 import { HOST, PresenceReporter, presenceKey } from './presence';
 import { Arg } from './resp';
@@ -58,6 +59,8 @@ export class Publisher {
 
   async publish<T = unknown>(topic: string, payload: T, options: PublishOptions = {}): Promise<string> {
     const args = this.build(topic, { payload, event: options.event, headers: options.headers }, options.maxLen);
+    const tracer = getTracer();
+    if (tracer && currentTrace()) tracer.event(`publish ${topic}`, { topic, event: options.event });
     const id = (await this.client.call(...args)) as string;
     this.note(topic, 1);
     return id;
@@ -84,7 +87,8 @@ export class Publisher {
       ts: String(Date.now()),
       producer: `${this.opts.service}/${this.opts.instance}`,
     };
-    if (m.headers && Object.keys(m.headers).length > 0) fields.headers = JSON.stringify(m.headers);
+    const headers = { ...traceHeader(), ...(m.headers ?? {}) };
+    if (Object.keys(headers).length > 0) fields.headers = JSON.stringify(headers);
     return SnugKvClient.xaddArgs(this.keyFor(topic), fields, { maxLen: maxLen ?? this.opts.defaultMaxLen });
   }
 

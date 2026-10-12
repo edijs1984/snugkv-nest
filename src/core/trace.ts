@@ -195,6 +195,15 @@ export class Tracer {
     return this.run(name, parent, attrs, fn);
   }
 
+  /**
+   * Starts a step without a callback; call `span.end(error?)` when it is done
+   * and run its code with {@link runIn} so nested steps attach to it. For
+   * callbacks prefer {@link step}.
+   */
+  start(name: string, attrs: Record<string, unknown> = {}, parent: TraceContext | undefined = currentTrace()): Span {
+    return new Span(this, name, parent?.spanId ?? '', parent?.traceId ?? newId(16), attrs);
+  }
+
   /** Records a step that already happened (no callback), e.g. "push sent". */
   event(name: string, attrs: Record<string, unknown> = {}, error?: unknown): void {
     const parent = currentTrace();
@@ -264,6 +273,26 @@ export class Tracer {
     await this.flush();
     if (this.buffer.length) await this.flush();
   }
+}
+
+/** Runs `fn` with `ctx` as the current trace context. */
+export function runIn<T>(ctx: TraceContext, fn: () => T): T {
+  return storage.run(ctx, fn);
+}
+
+// ----- carrying the context in message headers
+
+/** Header snugkv-nest puts on published messages while a trace is active. */
+export const TRACE_HEADER = 'x-snug-trace';
+
+export function traceHeader(): Record<string, string> {
+  const ctx = currentTrace();
+  return ctx && globalTracer ? { [TRACE_HEADER]: `${ctx.traceId}-${ctx.spanId}` } : {};
+}
+
+export function parseTraceHeader(value: string | undefined): TraceContext | undefined {
+  const m = /^([0-9a-f]{8,64})-([0-9a-f]{4,32})$/.exec(value ?? '');
+  return m ? { traceId: m[1]!, spanId: m[2]! } : undefined;
 }
 
 // ----- carrying the context inside job data
