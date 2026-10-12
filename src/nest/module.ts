@@ -1,5 +1,5 @@
 import { DynamicModule, InjectionToken, Logger, Module, ModuleMetadata, OptionalFactoryDependency, Provider } from '@nestjs/common';
-import { DiscoveryModule } from '@nestjs/core';
+import { APP_INTERCEPTOR, DiscoveryModule } from '@nestjs/core';
 import { SnugKvBus, SnugKvBusOptions } from '../core/bus';
 import { CacheOptions, SnugKvCache } from '../core/cache';
 import { SnugKvClient } from '../core/client';
@@ -8,6 +8,8 @@ import { FlowProducer } from '../core/queue/flow';
 import { SnugKvSubscriber } from '../core/pubsub';
 import { SnugKvRateLimiter } from '../core/ratelimit';
 import { setTracer, Tracer, TracerOptions } from '../core/trace';
+import { instrumentHttpClient } from '../core/trace-http';
+import { TraceInterceptor } from './trace-interceptor';
 import { BusLogger } from '../core/util';
 import { SnugKvRuntime } from './runtime';
 import { SNUG_OPTIONS } from './tokens';
@@ -34,7 +36,16 @@ export interface SnugKvModuleOptions extends Omit<SnugKvBusOptions, 'service'> {
    * {@link Tracer} records your own steps. Spans go to the `snug:traces`
    * stream unless `stream` says otherwise. Off by default.
    */
-  tracing?: boolean | Omit<TracerOptions, 'service'>;
+  tracing?: boolean | SnugTracingOptions;
+}
+
+export interface SnugTracingOptions extends Omit<TracerOptions, 'service'> {
+  /** Make every incoming HTTP request a trace (default true). */
+  http?: boolean;
+  /** Paths not traced (default `/health`, `/api/health`, `/metrics`, `/favicon.ico`). */
+  ignorePaths?: string[];
+  /** Record outgoing HTTP calls (http, https, fetch) made inside a trace (default true). */
+  httpClient?: boolean;
 }
 
 export interface SnugKvModuleAsyncOptions extends Pick<ModuleMetadata, 'imports'> {
@@ -102,10 +113,13 @@ const sharedProviders: Provider[] = [
         service: o.service ?? 'app',
       });
       setTracer(tracer);
+      if (o.tracing === true || o.tracing.httpClient !== false) instrumentHttpClient();
       return tracer;
     },
     inject: [SnugKvClient, SNUG_OPTIONS],
   },
+  // Passes requests straight through unless tracing (and its `http` option) is on.
+  { provide: APP_INTERCEPTOR, useClass: TraceInterceptor },
   SnugKvRuntime,
 ];
 

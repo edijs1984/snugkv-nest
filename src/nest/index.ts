@@ -5,3 +5,4 @@ export * from './queue-decorators';
 export * from './queue-module';
 export { SnugKvRuntime } from './runtime';
 export { SNUG_OPTIONS } from './tokens';
+export { TraceInterceptor, DEFAULT_IGNORED_PATHS } from './trace-interceptor';

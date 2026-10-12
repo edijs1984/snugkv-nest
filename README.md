@@ -174,7 +174,14 @@ when the server is unreachable, spans are buffered and written later.
 The trace travels inside job data as a `__trace` field (plain-object data
 only) and is removed before your processor sees `job.data`.
 
-Options: `tracing: { stream, maxLen, batchSize, flushMs, maxBuffer, redact, maxAttrLength }`.
+What is traced without any code:
+
+- **Incoming HTTP requests** (Nest apps): every request is a trace named after its route, e.g. `POST /api/transactions/:id/send`, with the status code and the error of a failed request. The trace id is returned in the `x-trace-id` response header. Bodies and headers are not recorded. `/health`, `/api/health`, `/metrics` are skipped.
+- **Queue jobs**: `queue.add()` carries the trace, the worker continues it.
+- **Stream messages**: `bus.publish()` adds an `x-snug-trace` header, `@SnugSubscribe` handlers continue the trace.
+- **Outgoing HTTP calls** (`http`, `https`, so axios and most SDKs, and `fetch`) made inside a trace: method, host, status, and the path with the query dropped and long segments (API keys in RPC URLs) masked.
+
+Options: `tracing: { http, ignorePaths, httpClient, stream, maxLen, batchSize, flushMs, maxBuffer, redact, maxAttrLength }`.
 Without Nest: `const tracer = new Tracer(client, { service: 'api' }); setTracer(tracer);`
 
 ## Messaging (streams)

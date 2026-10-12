@@ -1,3 +1,4 @@
+import { getTracer, parseTraceHeader, TRACE_HEADER } from './trace';
 import { SnugKvClient, StreamEntry } from './client';
 import { HOST, PresenceReporter, presenceKey } from './presence';
 import { Serializer } from './publisher';
@@ -388,7 +389,17 @@ export class Consumer {
       }
       ctx.attempt = attempt;
       try {
-        await this.handler(payload, ctx);
+        const tracer = getTracer();
+        if (tracer) {
+          await tracer.continue(
+            parseTraceHeader(ctx.headers[TRACE_HEADER]),
+            `${this.topic}:${ctx.event || 'message'}`,
+            { topic: this.topic, group: this.group, event: ctx.event, messageId: ctx.messageId, attempt },
+            () => this.handler(payload, ctx),
+          );
+        } else {
+          await this.handler(payload, ctx);
+        }
       } catch (err) {
         lastError = err;
         this.failed++;
