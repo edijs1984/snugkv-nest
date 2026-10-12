@@ -117,6 +117,11 @@ export class SnugKvClient extends EventEmitter {
     return this.conn;
   }
 
+  /** Connection name (`CLIENT SETNAME`), if one was given. */
+  get name(): string | undefined {
+    return this.options.name;
+  }
+
   get isReady(): boolean {
     return this.conn.isReady;
   }
@@ -444,9 +449,14 @@ export class SnugKvClient extends EventEmitter {
     return (await this.call('PUBLISH', channel, message)) as number;
   }
 
-  /** A subscriber with its own connection and the same settings. */
+  /**
+   * A subscriber with its own connection and the same settings. It is named
+   * `<this client's name>:sub` unless `overrides.name` says otherwise, so it
+   * can be told apart in `CLIENT LIST`.
+   */
   subscriber(overrides: SnugKvClientOptions = {}): SnugKvSubscriber {
-    return new SnugKvSubscriber(this.duplicate({ name: undefined, ...overrides }));
+    const name = this.options.name ? `${this.options.name}:sub` : undefined;
+    return new SnugKvSubscriber(this.duplicate({ name, ...overrides }));
   }
 
   // ----- transactions

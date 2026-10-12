@@ -56,6 +56,19 @@ describe('queues against a real server', opts, () => {
     return w;
   };
 
+  test('worker wake-up connections are named after the app and the queue', async () => {
+    const qn = name();
+    const named = client.duplicate({ name: 'svc/inst' });
+    await named.connect(5000);
+    const w = new Worker(qn, async () => undefined, { client: named, drainDelay: 300 });
+    w.on('error', () => undefined);
+    closers.push(async () => {
+      await w.close(true);
+      named.close();
+    });
+    await until(async () => String(await client.call('CLIENT', 'LIST')).includes(`name=svc/inst:wake:${qn}`));
+  });
+
   test('a job continues the trace it was added in', async () => {
     const qn = name();
     const q = queue(qn);
