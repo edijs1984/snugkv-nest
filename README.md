@@ -132,6 +132,51 @@ Use `@SnugProcess('jobName')` on methods instead of `process()` to route by job 
 
 Supported: priorities, LIFO, delayed jobs, attempts with fixed, exponential or custom backoff (`UnrecoverableError` skips retries), locks with stalled-job recovery, pause/resume, global concurrency, queue rate limits (`limiter`, `queue.setRateLimit`, `worker.rateLimit` + `RateLimitError`), custom ids and deduplication, `removeOnComplete`/`removeOnFail`, progress and logs, `QueueEvents` and `job.waitUntilFinished`, `drain`/`clean`/`obliterate`/`retryJobs`/`promoteJobs`, repeatable jobs (`upsertJobScheduler` with `every` or a cron `pattern` and `tz`), and parent/child flows (`FlowProducer`, `job.getChildrenValues()`, `failParentOnFailure`, `ignoreDependencyOnFailure`). Job data must be JSON-serialisable. Cron patterns are computed by workers, so keep one running. See the server's `docs/QUEUES.md` for the storage layout.
 
+## Flow tracing
+
+Turn on `tracing` and every activity becomes one trace you can follow across
+services: a webhook, the jobs it queues, the worker in another service that
+handles them, and every step you mark in between.
+
+```ts
+SnugKvModule.forRoot({ url: 'snugkv://localhost:6383', service: 'chain-ingest', tracing: true });
+
+@Injectable()
+export class WebhooksService {
+  // Injectable when `tracing` is on (null otherwise).
+  constructor(private readonly tracer: Tracer, @InjectSnugQueue('chain-events') private readonly q: Queue) {}
+
+  async onWebhook(body: AlchemyEvent) {
+    // A step with no trace around it starts a new trace.
+    return this.tracer.step('webhook.alchemy', { network: body.event.network }, async (span) => {
+      await this.tracer.step('dedup', {}, () => this.checkDuplicate(body));
+      await this.q.add('deposit.detected', { txHash, address }); // carries the trace
+      span.set({ transfers: body.event.activity.length });
+    });
+  }
+}
+```
+
+The worker that processes `deposit.detected` (in any service with tracing on)
+runs inside a span of the same trace. Inside it, `tracer.step()` nests further
+and `tracer.event('push.sent', { ticket })` records a step that already
+happened. A step that throws is recorded with its error and stack, and the
+error is rethrown unchanged.
+
+Spans are written in batches to the `snug:traces` stream (capped at about
+100,000 entries). Each entry has `traceId`, `spanId`, `parentId`, `service`,
+`name`, `status` (`ok` / `error`), `start`, `durationMs`, `attrs` (JSON) and,
+for failures, `error` and `stack`. Attribute keys that look like credentials
+(`token`, `secret`, `signature`, `privateKey`, `seed`, ...) are stored as
+`[redacted]`, and long strings are cut. Tracing never throws into your code:
+when the server is unreachable, spans are buffered and written later.
+
+The trace travels inside job data as a `__trace` field (plain-object data
+only) and is removed before your processor sees `job.data`.
+
+Options: `tracing: { stream, maxLen, batchSize, flushMs, maxBuffer, redact, maxAttrLength }`.
+Without Nest: `const tracer = new Tracer(client, { service: 'api' }); setTracer(tracer);`
+
 ## Messaging (streams)
 
 ## Quick start

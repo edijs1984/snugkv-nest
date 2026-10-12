@@ -7,6 +7,7 @@ import { SnugKvLocks } from '../core/lock';
 import { FlowProducer } from '../core/queue/flow';
 import { SnugKvSubscriber } from '../core/pubsub';
 import { SnugKvRateLimiter } from '../core/ratelimit';
+import { setTracer, Tracer, TracerOptions } from '../core/trace';
 import { BusLogger } from '../core/util';
 import { SnugKvRuntime } from './runtime';
 import { SNUG_OPTIONS } from './tokens';
@@ -28,6 +29,12 @@ export interface SnugKvModuleOptions extends Omit<SnugKvBusOptions, 'service'> {
   autoProcess?: boolean;
   /** Key prefix for queues (default `snugq`). */
   queuePrefix?: string;
+  /**
+   * Flow tracing: queue jobs carry the trace to the worker, and an injectable
+   * {@link Tracer} records your own steps. Spans go to the `snug:traces`
+   * stream unless `stream` says otherwise. Off by default.
+   */
+  tracing?: boolean | Omit<TracerOptions, 'service'>;
 }
 
 export interface SnugKvModuleAsyncOptions extends Pick<ModuleMetadata, 'imports'> {
@@ -50,7 +57,7 @@ const sharedProviders: Provider[] = [
   {
     provide: SnugKvBus,
     useFactory: (options: SnugKvModuleOptions) => {
-      const { isGlobal, autoSubscribe, autoProcess, queuePrefix, cache, lockPrefix, rateLimitPrefix, service, ...bus } = options;
+      const { isGlobal, autoSubscribe, autoProcess, queuePrefix, cache, lockPrefix, rateLimitPrefix, service, tracing, ...bus } = options;
       return new SnugKvBus({ logger: nestLogger(), service: service ?? 'app', ...bus });
     },
     inject: [SNUG_OPTIONS],
@@ -77,10 +84,32 @@ const sharedProviders: Provider[] = [
     useFactory: (client: SnugKvClient, o: SnugKvModuleOptions) => new FlowProducer({ client, prefix: o.queuePrefix }),
     inject: [SnugKvClient, SNUG_OPTIONS],
   },
+  {
+    // Null when tracing is off; inject it with @Optional().
+    provide: Tracer,
+    useFactory: (client: SnugKvClient, o: SnugKvModuleOptions) => {
+      if (!o.tracing) return null;
+      const log = new Logger('SnugKV');
+      let warned = 0;
+      const tracer = new Tracer(client, {
+        onError: (e) => {
+          if (Date.now() - warned > 60_000) {
+            warned = Date.now();
+            log.warn(`trace spans not written: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        },
+        ...(o.tracing === true ? {} : o.tracing),
+        service: o.service ?? 'app',
+      });
+      setTracer(tracer);
+      return tracer;
+    },
+    inject: [SnugKvClient, SNUG_OPTIONS],
+  },
   SnugKvRuntime,
 ];
 
-const exported = [SnugKvBus, SnugKvClient, SnugKvSubscriber, SnugKvCache, SnugKvLocks, SnugKvRateLimiter, FlowProducer];
+const exported = [SnugKvBus, SnugKvClient, SnugKvSubscriber, SnugKvCache, SnugKvLocks, SnugKvRateLimiter, FlowProducer, Tracer];
 
 @Module({})
 export class SnugKvModule {

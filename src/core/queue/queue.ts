@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { currentTrace, getTracer, withTrace } from '../trace';
 import { EventEmitter } from 'node:events';
 import { SnugKvClient, SnugKvClientOptions } from '../client';
 import { Arg, RespError } from '../resp';
@@ -130,7 +131,8 @@ export class Queue<D = any, R = any> extends EventEmitter implements QueueLike {
   async add(name: string, data: D, opts: JobsOptions = {}): Promise<Job<D, R>> {
     const o = { ...this.defaults, ...opts };
     const parent = o.parent ? { base: this.baseOf(o.parent.queue), id: o.parent.id } : undefined;
-    const reply = (await this.fcall('snugq_add', ...jobArgs(name, data, o, { parentBase: parent?.base, parentId: parent?.id }))) as [string, number];
+    const reply = (await this.fcall('snugq_add', ...jobArgs(name, withTrace(data), o, { parentBase: parent?.base, parentId: parent?.id }))) as [string, number];
+    traceEnqueue(this.name, name, reply[0]);
     if (reply[1] === 0) return (await this.getJob(reply[0])) ?? localJob(this, reply[0], name, data, o, parent);
     return localJob(this, reply[0], name, data, o, parent);
   }
@@ -144,7 +146,7 @@ export class Queue<D = any, R = any> extends EventEmitter implements QueueLike {
       return { j, o, parent };
     });
     const replies = await this.client.pipeline(
-      prepared.map((p) => ['FCALL', 'snugq_add', 1, this.base, ...jobArgs(p.j.name, p.j.data, p.o, { parentBase: p.parent?.base, parentId: p.parent?.id })] as Arg[]),
+      prepared.map((p) => ['FCALL', 'snugq_add', 1, this.base, ...jobArgs(p.j.name, withTrace(p.j.data), p.o, { parentBase: p.parent?.base, parentId: p.parent?.id })] as Arg[]),
     );
     const out: Array<Job<D, R>> = [];
     for (let i = 0; i < replies.length; i++) {
@@ -152,6 +154,7 @@ export class Queue<D = any, R = any> extends EventEmitter implements QueueLike {
       if (r instanceof RespError) throw r;
       const [id, added] = r as [string, number];
       const p = prepared[i]!;
+      traceEnqueue(this.name, p.j.name, id);
       out.push(added === 0 ? ((await this.getJob(id)) ?? localJob(this, id, p.j.name, p.j.data, p.o, p.parent)) : localJob(this, id, p.j.name, p.j.data, p.o, p.parent));
     }
     return out;
@@ -418,3 +421,9 @@ export class Queue<D = any, R = any> extends EventEmitter implements QueueLike {
 }
 
 export { toJson };
+
+/** Records "job added" as a step of the current trace, when there is one. */
+function traceEnqueue(queue: string, name: string, id: string): void {
+  const tracer = getTracer();
+  if (tracer && currentTrace()) tracer.event(`enqueue ${queue}:${name}`, { queue, job: name, jobId: id });
+}

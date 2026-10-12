@@ -1,7 +1,7 @@
 {
   "name": "snugkv-nest",
-  "version": "0.3.0",
-  "description": "NestJS module and TypeScript client for SnugKV: data types, cache, locks, rate limits, pub/sub, transactions, job queues and a durable stream message bus.",
+  "version": "0.4.0",
+  "description": "NestJS module and TypeScript client for SnugKV: data types, cache, locks, rate limits, pub/sub, transactions, job queues, flow tracing and a durable stream message bus.",
   "keywords": [
     "nestjs",
     "snugkv",
