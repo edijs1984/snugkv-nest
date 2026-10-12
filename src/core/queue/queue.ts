@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { noteQueueProducer } from '../service-map';
 import { currentTrace, getTracer, withTrace } from '../trace';
 import { EventEmitter } from 'node:events';
 import { SnugKvClient, SnugKvClientOptions } from '../client';
@@ -133,6 +134,7 @@ export class Queue<D = any, R = any> extends EventEmitter implements QueueLike {
     const parent = o.parent ? { base: this.baseOf(o.parent.queue), id: o.parent.id } : undefined;
     const reply = (await this.fcall('snugq_add', ...jobArgs(name, withTrace(data), o, { parentBase: parent?.base, parentId: parent?.id }))) as [string, number];
     traceEnqueue(this.name, name, reply[0]);
+    noteQueueProducer(this.name);
     if (reply[1] === 0) return (await this.getJob(reply[0])) ?? localJob(this, reply[0], name, data, o, parent);
     return localJob(this, reply[0], name, data, o, parent);
   }
@@ -155,6 +157,7 @@ export class Queue<D = any, R = any> extends EventEmitter implements QueueLike {
       const [id, added] = r as [string, number];
       const p = prepared[i]!;
       traceEnqueue(this.name, p.j.name, id);
+      noteQueueProducer(this.name);
       out.push(added === 0 ? ((await this.getJob(id)) ?? localJob(this, id, p.j.name, p.j.data, p.o, p.parent)) : localJob(this, id, p.j.name, p.j.data, p.o, p.parent));
     }
     return out;

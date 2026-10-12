@@ -37,6 +37,11 @@ export interface SnugKvModuleOptions extends Omit<SnugKvBusOptions, 'service'> {
    * stream unless `stream` says otherwise. Off by default.
    */
   tracing?: boolean | SnugTracingOptions;
+  /**
+   * Describe this app in SnugKV (`snug:svc:<service>:<instance>`): its HTTP
+   * routes, queues and topics, for the console's Map page. Default true.
+   */
+  serviceMap?: boolean;
 }
 
 export interface SnugTracingOptions extends Omit<TracerOptions, 'service'> {
@@ -68,7 +73,7 @@ const sharedProviders: Provider[] = [
   {
     provide: SnugKvBus,
     useFactory: (options: SnugKvModuleOptions) => {
-      const { isGlobal, autoSubscribe, autoProcess, queuePrefix, cache, lockPrefix, rateLimitPrefix, service, tracing, ...bus } = options;
+      const { isGlobal, autoSubscribe, autoProcess, queuePrefix, cache, lockPrefix, rateLimitPrefix, service, tracing, serviceMap, ...bus } = options;
       return new SnugKvBus({ logger: nestLogger(), service: service ?? 'app', ...bus });
     },
     inject: [SNUG_OPTIONS],

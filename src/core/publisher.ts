@@ -1,3 +1,4 @@
+import { notePublish } from './service-map';
 import { currentTrace, getTracer, traceHeader } from './trace';
 import { SnugKvClient } from './client';
 import { HOST, PresenceReporter, presenceKey } from './presence';
@@ -59,6 +60,7 @@ export class Publisher {
 
   async publish<T = unknown>(topic: string, payload: T, options: PublishOptions = {}): Promise<string> {
     const args = this.build(topic, { payload, event: options.event, headers: options.headers }, options.maxLen);
+    notePublish(topic);
     const tracer = getTracer();
     if (tracer && currentTrace()) tracer.event(`publish ${topic}`, { topic, event: options.event });
     const id = (await this.client.call(...args)) as string;
@@ -68,6 +70,7 @@ export class Publisher {
 
   /** Publishes many messages in one round trip. Returns the entry ids in order. */
   async publishBatch<T = unknown>(topic: string, messages: Array<BatchMessage<T>>, options: { maxLen?: number } = {}): Promise<string[]> {
+    notePublish(topic);
     if (messages.length === 0) return [];
     const replies = await this.client.pipeline(messages.map((m) => this.build(topic, m, options.maxLen)));
     const ids: string[] = [];
