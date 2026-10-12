@@ -92,7 +92,9 @@ export class Worker<D = any, R = any> extends EventEmitter {
     if (this.opts.limiter) await this.queue.setRateLimit(this.opts.limiter);
     this.running = true;
     try {
-      this.sub = this.queue.client.subscriber();
+      const owner = this.queue.client.name;
+      // Named after the app and the queue, e.g. `ledger/<instance>:wake:chain-events`.
+      this.sub = this.queue.client.subscriber(owner ? { name: `${owner}:wake:${this.queue.name}` } : {});
       this.sub.on('error', () => undefined);
       this.unsub = await this.sub.subscribe(`${this.queue.base}wake`, () => this.wake());
     } catch (e) {
