@@ -12,3 +12,4 @@ export * from './cache';
 export * from './lock';
 export * from './ratelimit';
 export * from './queue';
+export * from './trace';

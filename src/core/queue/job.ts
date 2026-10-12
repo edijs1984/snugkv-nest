@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { pairsToObject } from '../client';
 import type { QueueEvents } from './events';
+import { takeTrace, TraceContext } from '../trace';
 import { JobsOptions, JobState, parseJson, QueueLike, queueNameOf, toJson } from './types';
 
 /** A job as stored on the server. Fetched jobs are snapshots; call `getState()` or `Queue.getJob()` for fresh data. */
@@ -29,12 +30,15 @@ export class Job<D = any, R = any> {
   readonly pendingChildren: number;
   /** Set by a worker. */
   readonly raw: Record<string, string>;
+  /** Trace the job was added in, when tracing is on. */
+  readonly trace: TraceContext | undefined;
 
   constructor(readonly queue: QueueLike, id: string, raw: Record<string, string>) {
     this.id = id;
     this.raw = raw;
     this.name = raw.name ?? '';
     this.data = parseJson(raw.data) as D;
+    this.trace = takeTrace(this.data);
     this.timestamp = Number(raw.ts ?? 0);
     this.delay = Number(raw.delay ?? 0);
     this.priority = Number(raw.prio ?? 0);

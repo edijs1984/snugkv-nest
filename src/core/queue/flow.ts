@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { withTrace } from '../trace';
 import { SnugKvClient, SnugKvClientOptions } from '../client';
 import { Arg, RespError } from '../resp';
 import { uuid } from '../util';
@@ -63,7 +64,7 @@ export class FlowProducer {
       const q = this.queue(f.queueName);
       const id = f.opts?.jobId ?? uuid();
       const opts: JobsOptions = { ...f.opts, jobId: id, parent: undefined };
-      commands.push(['FCALL', 'snugq_add', 1, q.base, ...jobArgs(f.name, f.data ?? null, opts, { parentBase: parent?.base, parentId: parent?.id, waitChildren: (f.children?.length ?? 0) > 0 })]);
+      commands.push(['FCALL', 'snugq_add', 1, q.base, ...jobArgs(f.name, withTrace(f.data ?? null), opts, { parentBase: parent?.base, parentId: parent?.id, waitChildren: (f.children?.length ?? 0) > 0 })]);
       const node: JobNode = { job: localJob(q, id, f.name, f.data ?? null, opts, parent) };
       if (f.children?.length) node.children = f.children.map((c) => walk(c, { base: q.base, id }));
       return node;

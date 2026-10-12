@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import { SnugKvClient } from '../src/core';
 import { DelayedError, FlowProducer, Job, Queue, QueueEvents, RateLimitError, UnrecoverableError, Worker, nextCronTime } from '../src/core/queue';
+import { currentTrace, setTracer, Tracer } from '../src/core/trace';
 import { haveServer, sleep, startServer, TestServer, until } from './helpers';
 
 const opts = { skip: !haveServer && 'set SNUGKV_BIN to a snugkv binary' };
@@ -54,6 +55,37 @@ describe('queues against a real server', opts, () => {
     closers.push(() => w.close(true));
     return w;
   };
+
+  test('a job continues the trace it was added in', async () => {
+    const qn = name();
+    const q = queue(qn);
+    const tracer = new Tracer(client, { service: 'svc', stream: `traces-${qn}`, flushMs: 60_000 });
+    setTracer(tracer);
+    closers.push(async () => {
+      setTracer(undefined);
+      await tracer.close();
+    });
+    let seen: { trace?: string; data?: unknown } = {};
+    worker<{ n: number }, void>(qn, async (job) => {
+      seen = { trace: currentTrace()?.traceId, data: job.data };
+    });
+    let traceId = '';
+    await tracer.step('webhook', {}, async () => {
+      traceId = currentTrace()!.traceId;
+      await q.add('t', { n: 1 });
+    });
+    await until(() => seen.trace !== undefined);
+    assert.equal(seen.trace, traceId);
+    assert.deepEqual(seen.data, { n: 1 }); // the trace field is not visible to the processor
+    await until(async () => {
+      await tracer.flush();
+      return (await client.xlen(`traces-${qn}`)) >= 3;
+    });
+    const names = (await client.xrange(`traces-${qn}`)).map((e) => e.fields.name);
+    assert.ok(names.includes('webhook'));
+    assert.ok(names.includes(`enqueue ${qn}:t`));
+    assert.ok(names.includes(`${qn}:t`));
+  });
 
   test('adds jobs and processes them in order, with priority and lifo', async () => {
     const qn = name();

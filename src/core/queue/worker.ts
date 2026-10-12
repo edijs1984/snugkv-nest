@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { getTracer } from '../trace';
 import { EventEmitter } from 'node:events';
 import { SnugKvClient, SnugKvClientOptions } from '../client';
 import type { SnugKvSubscriber } from '../pubsub';
@@ -181,7 +182,10 @@ export class Worker<D = any, R = any> extends EventEmitter {
       };
       let result: R;
       try {
-        result = await this.processor(job, token);
+        const tracer = getTracer();
+        result = tracer
+          ? await tracer.continue(job.trace, `${this.queue.name}:${job.name}`, { queue: this.queue.name, job: job.name, jobId: job.id, attempt: job.attemptsMade + 1 }, () => this.processor(job, token))
+          : await this.processor(job, token);
       } catch (err) {
         await this.onFailure(job, token, err instanceof Error ? err : new Error(errorMessage(err)));
         return;

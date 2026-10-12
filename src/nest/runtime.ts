@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy, On
 import { DiscoveryService } from '@nestjs/core';
 import { SnugKvBus, Subscription } from '../core/bus';
 import { Worker } from '../core/queue/worker';
+import { getTracer, setTracer } from '../core/trace';
 import { collectProcessors, collectSubscriptions } from './explorer';
 import { SNUG_OPTIONS } from './tokens';
 import type { SnugKvModuleOptions } from './module';
@@ -57,6 +58,11 @@ export class SnugKvRuntime implements OnModuleInit, OnApplicationBootstrap, OnMo
 
   async onModuleDestroy(): Promise<void> {
     await Promise.allSettled(this.workers.splice(0).map((w) => w.close()));
+    const tracer = getTracer();
+    if (tracer) {
+      await tracer.close().catch(() => undefined);
+      setTracer(undefined);
+    }
     await this.bus.close();
     this.subscriptions = [];
   }
