@@ -9,6 +9,7 @@ import { SnugKvSubscriber } from '../core/pubsub';
 import { SnugKvRateLimiter } from '../core/ratelimit';
 import { setTracer, Tracer, TracerOptions } from '../core/trace';
 import { instrumentHttpClient } from '../core/trace-http';
+import type { ServiceDependency } from '../core/service-map';
 import { TraceInterceptor } from './trace-interceptor';
 import { BusLogger } from '../core/util';
 import { SnugKvRuntime } from './runtime';
@@ -41,7 +42,7 @@ export interface SnugKvModuleOptions extends Omit<SnugKvBusOptions, 'service'> {
    * Describe this app in SnugKV (`snug:svc:<service>:<instance>`): its HTTP
    * routes, queues and topics, for the console's Map page. Default true.
    */
-  serviceMap?: boolean;
+  serviceMap?: boolean | { dependencies?: ServiceDependency[] };
 }
 
 export interface SnugTracingOptions extends Omit<TracerOptions, 'service'> {

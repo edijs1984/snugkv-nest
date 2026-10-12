@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy, OnModuleInit, RequestMethod } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { ApplicationConfig, DiscoveryService, ModuleRef } from '@nestjs/core';
-import { ServiceCardReporter, ServiceRoute } from '../core/service-map';
+import { declareDependency, ServiceCardReporter, ServiceRoute } from '../core/service-map';
+import { parseUrl } from '../core/util';
 import { SnugKvBus, Subscription } from '../core/bus';
 import { Worker } from '../core/queue/worker';
 import { getTracer, setTracer } from '../core/trace';
@@ -60,6 +61,18 @@ export class SnugKvRuntime implements OnModuleInit, OnApplicationBootstrap, OnMo
       }
     }
     if (this.options.serviceMap !== false) {
+      // SnugKV itself is always a dependency.
+      let address: string | undefined;
+      try {
+        if (this.options.url) {
+          const u = parseUrl(this.options.url);
+          address = `${u.host}:${u.port}`;
+        } else if (this.options.host) address = `${this.options.host}:${this.options.port ?? 6379}`;
+      } catch {
+        /* unusual URL: leave the address out */
+      }
+      declareDependency({ kind: 'snugkv', name: 'SnugKV', address });
+      for (const d of (typeof this.options.serviceMap === 'object' ? this.options.serviceMap.dependencies : undefined) ?? []) declareDependency(d);
       this.card = new ServiceCardReporter(this.bus.client, { service: this.bus.service, instance: this.bus.instance, http: this.routes() });
       this.card.start();
     }

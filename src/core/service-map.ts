@@ -20,6 +20,24 @@ export interface ServiceRoute {
   handler?: string;
 }
 
+/**
+ * Something outside the app that it depends on or that calls it: a database,
+ * SnugKV itself, a third-party API, a webhook provider.
+ */
+export interface ServiceDependency {
+  /** `snugkv`, `mongodb`, `postgres`, `redis`, `http`, … */
+  kind: string;
+  /** Shown on the map, e.g. `MongoDB`, `Alchemy`. */
+  name: string;
+  /** `host:port` or a host name; never credentials. */
+  address?: string;
+  /** `out` (default): the app calls it. `in`: it calls the app (webhooks). */
+  direction?: 'in' | 'out';
+  /** For `in`: the routes it calls. For `out` HTTP APIs: host names it is reached at. */
+  routes?: string[];
+  hosts?: string[];
+}
+
 export interface ServiceCard {
   service: string;
   instance: string;
@@ -39,6 +57,7 @@ export interface ServiceCard {
     publishes: string[];
     subscribes: Array<{ topic: string; group?: string }>;
   };
+  dependencies: ServiceDependency[];
 }
 
 /** What this process does with queues and topics, filled in as it runs. */
@@ -47,7 +66,19 @@ const seen = {
   processes: new Map<string, number | undefined>(),
   publishes: new Set<string>(),
   subscribes: new Map<string, string | undefined>(),
+  dependencies: new Map<string, ServiceDependency>(),
 };
+
+/**
+ * Adds something this app uses or is called by to its service card, for the
+ * console's map: `declareDependency({ kind: 'mongodb', name: 'MongoDB', address: 'mongo:27017' })`,
+ * `declareDependency({ kind: 'http', name: 'Alchemy', direction: 'in', routes: ['/api/webhooks/alchemy'] })`.
+ * Declaring the same kind and name again replaces it.
+ */
+export function declareDependency(dep: ServiceDependency): void {
+  const address = dep.address?.replace(/\/\/[^@/]*@/, '//').replace(/^[^@/]*@/, '');
+  seen.dependencies.set(`${dep.kind}\u0000${dep.name}\u0000${dep.direction ?? 'out'}`, { ...dep, address });
+}
 
 /** @internal Called by Queue.add, registered queues and FlowProducer. */
 export function noteQueueProducer(queue: string): void {
@@ -75,6 +106,7 @@ export function resetServiceMap(): void {
   seen.processes.clear();
   seen.publishes.clear();
   seen.subscribes.clear();
+  seen.dependencies.clear();
 }
 
 export interface ServiceCardOptions {
@@ -121,6 +153,7 @@ export class ServiceCardReporter {
         publishes: [...seen.publishes].sort(),
         subscribes: [...seen.subscribes].map(([topic, group]) => ({ topic, group })).sort((a, b) => a.topic.localeCompare(b.topic)),
       },
+      dependencies: [...seen.dependencies.values()],
     };
   }
 
