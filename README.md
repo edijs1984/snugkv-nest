@@ -200,6 +200,18 @@ The card is a JSON string at `snug:svc:<service>:<instance>`, refreshed every 15
 }
 ```
 
+The card also lists **dependencies**: things outside the app it uses or is called by. SnugKV is added by itself; declare the rest once at startup so the map shows the whole picture:
+
+```ts
+import { declareDependency } from 'snugkv-nest';
+
+declareDependency({ kind: 'mongodb', name: 'MongoDB', address: 'mongo:27017' });
+declareDependency({ kind: 'http', name: 'Alchemy', direction: 'in', routes: ['/api/evm/alchemy-webhook'] }); // calls us
+declareDependency({ kind: 'http', name: 'Alchemy', hosts: ['eth-sepolia.g.alchemy.com'] });             // we call it
+```
+
+or pass them as `serviceMap: { dependencies: [...] }`. Credentials in addresses are removed.
+
 Routes come from the app's controllers (with the global prefix). Queues and topics are recorded as they are used: registered with `SnugKvQueueModule`, added to, processed by a worker, published to or subscribed to. Turn it off with `serviceMap: false`. With `tracing: true` the Map page also draws what actually happens (traffic, errors, external hosts, databases) from the traces.
 
 ## Messaging (streams)
