@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { noteQueueProducer } from '../service-map';
 import { withTrace } from '../trace';
 import { SnugKvClient, SnugKvClientOptions } from '../client';
 import { Arg, RespError } from '../resp';
@@ -44,6 +45,7 @@ export class FlowProducer {
   }
 
   private queue(name: string): Queue {
+    noteQueueProducer(name);
     let q = this.queues.get(name);
     if (!q) {
       q = new Queue(name, { client: this.client, prefix: this.prefix });

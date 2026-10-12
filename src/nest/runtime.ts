@@ -1,5 +1,7 @@
-import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { DiscoveryService } from '@nestjs/core';
+import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy, OnModuleInit, RequestMethod } from '@nestjs/common';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { ApplicationConfig, DiscoveryService, ModuleRef } from '@nestjs/core';
+import { ServiceCardReporter, ServiceRoute } from '../core/service-map';
 import { SnugKvBus, Subscription } from '../core/bus';
 import { Worker } from '../core/queue/worker';
 import { getTracer, setTracer } from '../core/trace';
@@ -16,11 +18,13 @@ export class SnugKvRuntime implements OnModuleInit, OnApplicationBootstrap, OnMo
   private readonly log = new Logger('SnugKV');
   private subscriptions: Subscription[] = [];
   private workers: Worker[] = [];
+  private card?: ServiceCardReporter;
 
   constructor(
     private readonly bus: SnugKvBus,
     private readonly discovery: DiscoveryService,
     @Inject(SNUG_OPTIONS) private readonly options: SnugKvModuleOptions,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -48,15 +52,50 @@ export class SnugKvRuntime implements OnModuleInit, OnApplicationBootstrap, OnMo
         this.log.log(`${p.instance.constructor.name} processes queue ${p.meta.queue} (concurrency ${p.meta.options.concurrency ?? 1})`);
       }
     }
-    if (this.options.autoSubscribe === false) return;
-    for (const s of collectSubscriptions(instances)) {
-      const sub = await this.bus.subscribe(s.meta, s.handler);
-      this.subscriptions.push(sub);
-      this.log.log(`${s.instance.constructor.name}.${String(s.method)} ← ${s.meta.topic} (group ${sub.group}, consumer ${sub.consumer})`);
+    if (this.options.autoSubscribe !== false) {
+      for (const s of collectSubscriptions(instances)) {
+        const sub = await this.bus.subscribe(s.meta, s.handler);
+        this.subscriptions.push(sub);
+        this.log.log(`${s.instance.constructor.name}.${String(s.method)} ← ${s.meta.topic} (group ${sub.group}, consumer ${sub.consumer})`);
+      }
+    }
+    if (this.options.serviceMap !== false) {
+      this.card = new ServiceCardReporter(this.bus.client, { service: this.bus.service, instance: this.bus.instance, http: this.routes() });
+      this.card.start();
     }
   }
 
+  /** HTTP routes of the app's controllers, with the global prefix when it can be read. */
+  private routes(): ServiceRoute[] {
+    let prefix = '';
+    try {
+      prefix = this.moduleRef.get(ApplicationConfig, { strict: false })?.getGlobalPrefix() ?? '';
+    } catch {
+      /* not an HTTP app, or the config is not reachable */
+    }
+    const join = (...parts: string[]) => '/' + parts.map((p) => p.replace(/^\/+|\/+$/g, '')).filter(Boolean).join('/');
+    const asList = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : [v === undefined ? '' : String(v)]);
+    const out: ServiceRoute[] = [];
+    for (const w of this.discovery.getControllers()) {
+      const ctrl = w.metatype as (new (...a: unknown[]) => unknown) | undefined;
+      if (!ctrl?.prototype) continue;
+      const bases = asList(Reflect.getMetadata(PATH_METADATA, ctrl));
+      const proto = ctrl.prototype as Record<string, unknown>;
+      for (const name of Object.getOwnPropertyNames(proto)) {
+        if (name === 'constructor') continue;
+        const fn = Object.getOwnPropertyDescriptor(proto, name)?.value;
+        if (typeof fn !== 'function') continue;
+        const path = Reflect.getMetadata(PATH_METADATA, fn);
+        if (path === undefined) continue;
+        const method = RequestMethod[Reflect.getMetadata(METHOD_METADATA, fn) as RequestMethod] ?? 'GET';
+        for (const b of bases) for (const p of asList(path)) out.push({ method, path: join(prefix, b, p), handler: `${ctrl.name}.${name}` });
+      }
+    }
+    return out.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
+  }
+
   async onModuleDestroy(): Promise<void> {
+    await this.card?.stop();
     await Promise.allSettled(this.workers.splice(0).map((w) => w.close()));
     const tracer = getTracer();
     if (tracer) {

@@ -1,3 +1,4 @@
+import { noteSubscribe } from './service-map';
 import { hostname } from 'node:os';
 import { SnugKvClient, SnugKvClientOptions } from './client';
 import { Consumer, MessageHandler, SubscribeOptions, ConsumerStats } from './consumer';
@@ -95,6 +96,7 @@ export class SnugKvBus {
       presence: this.presence,
     });
     this.consumers.push(consumer);
+    noteSubscribe(options.topic, options.group ?? this.service);
     try {
       await consumer.start();
     } catch (err) {

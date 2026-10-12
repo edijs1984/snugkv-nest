@@ -1,3 +1,4 @@
+import { noteQueueProducer } from '../core/service-map';
 import { DynamicModule, Inject, Module, Provider } from '@nestjs/common';
 import { SnugKvClient } from '../core/client';
 import type { JobsOptions } from '../core/queue/types';
@@ -28,7 +29,10 @@ export class SnugKvQueueModule {
   static registerQueue(...configs: RegisterQueueOptions[]): DynamicModule {
     const providers: Provider[] = configs.map((c) => ({
       provide: getQueueToken(c.name),
-      useFactory: (client: SnugKvClient) => new Queue(c.name, { client, prefix: c.prefix, defaultJobOptions: c.defaultJobOptions }),
+      useFactory: (client: SnugKvClient) => {
+        noteQueueProducer(c.name);
+        return new Queue(c.name, { client, prefix: c.prefix, defaultJobOptions: c.defaultJobOptions });
+      },
       inject: [SnugKvClient],
     }));
     return { module: SnugKvQueueModule, providers, exports: providers.map((p) => (p as { provide: string }).provide) };

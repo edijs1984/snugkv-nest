@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { noteQueueWorker } from '../service-map';
 import { getTracer } from '../trace';
 import { EventEmitter } from 'node:events';
 import { SnugKvClient, SnugKvClientOptions } from '../client';
@@ -63,6 +64,7 @@ export class Worker<D = any, R = any> extends EventEmitter {
     if (typeof processor !== 'function') throw new Error('Worker needs a processor function');
     this.opts = { concurrency: 1, lockDuration: 30_000, stalledInterval: 30_000, maxStalledCount: 1, drainDelay: 5_000, ...options };
     this.queue = new Queue<D, R>(name, { client: options.client, connection: options.connection, prefix: options.prefix });
+    noteQueueWorker(name, this.opts.concurrency);
     this.queue.on('error', (e: Error) => this.emitError(e));
     if (options.autorun !== false) void this.run();
   }

@@ -184,6 +184,24 @@ What is traced without any code:
 Options: `tracing: { http, ignorePaths, httpClient, stream, maxLen, batchSize, flushMs, maxBuffer, redact, maxAttrLength }`.
 Without Nest: `const tracer = new Tracer(client, { service: 'api' }); setTracer(tracer);`
 
+## Service map
+
+Every app using `SnugKvModule` describes itself in SnugKV so tools can draw the whole system: the SnugKV console's **Map** page shows each service with its HTTP routes, the queues it adds jobs to and works on, and the topics it publishes and reads, connected into one picture. Nothing to write by hand.
+
+The card is a JSON string at `snug:svc:<service>:<instance>`, refreshed every 15 seconds and expiring after 45, so stopped instances disappear by themselves:
+
+```json
+{
+  "service": "ledger", "instance": "a1b2-3c4d", "host": "a1b2", "pid": 1, "startedAt": 1791800000000, "updatedAt": 1791800015000,
+  "sdk": "snugkv-nest",
+  "http": [{ "method": "GET", "path": "/api/balance/:address", "handler": "BalanceController.get" }],
+  "queues": { "produces": ["notify"], "processes": [{ "queue": "chain-events", "concurrency": 4 }] },
+  "topics": { "publishes": [], "subscribes": [] }
+}
+```
+
+Routes come from the app's controllers (with the global prefix). Queues and topics are recorded as they are used: registered with `SnugKvQueueModule`, added to, processed by a worker, published to or subscribed to. Turn it off with `serviceMap: false`. With `tracing: true` the Map page also draws what actually happens (traffic, errors, external hosts, databases) from the traces.
+
 ## Messaging (streams)
 
 ## Quick start
