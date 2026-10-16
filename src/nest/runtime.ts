@@ -6,6 +6,7 @@ import { parseUrl } from '../core/util';
 import { SnugKvBus, Subscription } from '../core/bus';
 import { Worker } from '../core/queue/worker';
 import { getTracer, setTracer } from '../core/trace';
+import { getLogShipper } from '../core/logs';
 import { collectProcessors, collectSubscriptions } from './explorer';
 import { SNUG_OPTIONS } from './tokens';
 import type { SnugKvModuleOptions } from './module';
@@ -115,6 +116,9 @@ export class SnugKvRuntime implements OnModuleInit, OnApplicationBootstrap, OnMo
       await tracer.close().catch(() => undefined);
       setTracer(undefined);
     }
+    // Last, so the shutdown lines above are shipped too. Capture stays on
+    // until the process exits; lines after this are dropped quietly.
+    await getLogShipper()?.close().catch(() => undefined);
     await this.bus.close();
     this.subscriptions = [];
   }

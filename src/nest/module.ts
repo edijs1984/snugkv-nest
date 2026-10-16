@@ -8,6 +8,7 @@ import { FlowProducer } from '../core/queue/flow';
 import { SnugKvSubscriber } from '../core/pubsub';
 import { SnugKvRateLimiter } from '../core/ratelimit';
 import { setTracer, Tracer, TracerOptions } from '../core/trace';
+import { captureLogs, LogShipper, LogShipperOptions } from '../core/logs';
 import { instrumentHttpClient } from '../core/trace-http';
 import type { ServiceDependency } from '../core/service-map';
 import { TraceInterceptor } from './trace-interceptor';
@@ -43,7 +44,16 @@ export interface SnugKvModuleOptions extends Omit<SnugKvBusOptions, 'service'> {
    * routes, queues and topics, for the console's Map page. Default true.
    */
   serviceMap?: boolean | { dependencies?: ServiceDependency[] };
+  /**
+   * Log shipping: everything the app writes to stdout and stderr (Nest's
+   * logger, winston, console.log) also goes to the `snug:logs` stream, where
+   * the console shows the logs of all services together. Terminal output is
+   * unchanged. Off by default.
+   */
+  logs?: boolean | SnugLogsOptions;
 }
+
+export type SnugLogsOptions = Omit<LogShipperOptions, 'service'>;
 
 export interface SnugTracingOptions extends Omit<TracerOptions, 'service'> {
   /** Make every incoming HTTP request a trace (default true). */
@@ -74,7 +84,7 @@ const sharedProviders: Provider[] = [
   {
     provide: SnugKvBus,
     useFactory: (options: SnugKvModuleOptions) => {
-      const { isGlobal, autoSubscribe, autoProcess, queuePrefix, cache, lockPrefix, rateLimitPrefix, service, tracing, serviceMap, ...bus } = options;
+      const { isGlobal, autoSubscribe, autoProcess, queuePrefix, cache, lockPrefix, rateLimitPrefix, service, tracing, serviceMap, logs, ...bus } = options;
       return new SnugKvBus({ logger: nestLogger(), service: service ?? 'app', ...bus });
     },
     inject: [SNUG_OPTIONS],
@@ -124,12 +134,35 @@ const sharedProviders: Provider[] = [
     },
     inject: [SnugKvClient, SNUG_OPTIONS],
   },
+  {
+    // Null when log shipping is off; inject it with @Optional().
+    provide: LogShipper,
+    useFactory: (client: SnugKvClient, o: SnugKvModuleOptions) => {
+      if (!o.logs) return null;
+      const out = process.stderr.write.bind(process.stderr);
+      let warned = 0;
+      const shipper = new LogShipper(client, {
+        // Written past the capture, so a failing write cannot loop.
+        onError: (e) => {
+          if (Date.now() - warned > 60_000) {
+            warned = Date.now();
+            out(`[SnugKV] log lines not written: ${e instanceof Error ? e.message : String(e)}\n`);
+          }
+        },
+        ...(o.logs === true ? {} : o.logs),
+        service: o.service ?? 'app',
+      });
+      captureLogs(shipper);
+      return shipper;
+    },
+    inject: [SnugKvClient, SNUG_OPTIONS],
+  },
   // Passes requests straight through unless tracing (and its `http` option) is on.
   { provide: APP_INTERCEPTOR, useClass: TraceInterceptor },
   SnugKvRuntime,
 ];
 
-const exported = [SnugKvBus, SnugKvClient, SnugKvSubscriber, SnugKvCache, SnugKvLocks, SnugKvRateLimiter, FlowProducer, Tracer];
+const exported = [SnugKvBus, SnugKvClient, SnugKvSubscriber, SnugKvCache, SnugKvLocks, SnugKvRateLimiter, FlowProducer, Tracer, LogShipper];
 
 @Module({})
 export class SnugKvModule {

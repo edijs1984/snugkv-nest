@@ -184,6 +184,20 @@ What is traced without any code:
 Options: `tracing: { http, ignorePaths, httpClient, stream, maxLen, batchSize, flushMs, maxBuffer, redact, maxAttrLength }`.
 Without Nest: `const tracer = new Tracer(client, { service: 'api' }); setTracer(tracer);`
 
+## Log shipping
+
+```ts
+SnugKvModule.forRoot({ url: 'snugkv://localhost:6383', service: 'ledger', logs: true });
+```
+
+Everything the app writes to stdout and stderr (Nest's logger, winston, pino, `console.log`, stack traces) is also written to the `snug:logs` stream. The terminal output does not change. The Logs page of the SnugKV console then shows the logs of every service in one place, with live tail, level and service filters and search.
+
+- Levels and contexts are read from Nest's console format, winston's `timestamp [Context] level: message`, JSON lines (`level`, `message`/`msg`, `context`) and `console.warn`/`console.error`. Anything else on stdout is `info`, on stderr `error`.
+- A line written inside a trace carries the trace id, so the console links it to the flow on the Traces page.
+- Lines are written in batches and kept in memory while the server is unreachable (newest 5,000). Shipping never throws into your code.
+
+Options (`logs: { … }`): `level` (lowest level shipped, default `debug`), `stream` (default `snug:logs`), `maxLen` (stream cap, default 100,000), `maxMessageLength` (default 8,000), `batchSize`, `flushMs`, `maxBuffer`, `instance` (default: host name). Without Nest: `captureLogs(new LogShipper(client, { service: 'worker' }))`.
+
 ## Service map
 
 Every app using `SnugKvModule` describes itself in SnugKV so tools can draw the whole system: the SnugKV console's **Map** page shows each service with its HTTP routes, the queues it adds jobs to and works on, and the topics it publishes and reads, connected into one picture. Nothing to write by hand.
