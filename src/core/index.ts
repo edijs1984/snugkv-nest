@@ -14,4 +14,5 @@ export * from './ratelimit';
 export * from './queue';
 export * from './trace';
 export * from './trace-http';
+export * from './logs';
 export * from './service-map';
