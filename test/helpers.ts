@@ -41,14 +41,14 @@ async function waitPort(port: number, ms = 10_000): Promise<void> {
 }
 
 /** Starts a real SnugKV server. Pass `dir` and `port` to restart on the same data. */
-export async function startServer(opts: { dir?: string; port?: number } = {}): Promise<TestServer> {
+export async function startServer(opts: { dir?: string; port?: number; args?: string[]; env?: NodeJS.ProcessEnv } = {}): Promise<TestServer> {
   const dir = opts.dir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'snugkv-nest-'));
   const port = opts.port ?? (await freePort());
   const adminPort = await freePort();
   const proc: ChildProcess = spawn(
     SNUGKV_BIN,
-    ['-listen', `127.0.0.1:${port}`, '-admin-listen', `127.0.0.1:${adminPort}`, '-aof', path.join(dir, 'a.aof'), '-fsync', 'always', '-stream-dir', path.join(dir, 'streams')],
-    { stdio: 'ignore' },
+    ['-listen', `127.0.0.1:${port}`, '-admin-listen', `127.0.0.1:${adminPort}`, '-aof', path.join(dir, 'a.aof'), '-fsync', 'always', '-stream-dir', path.join(dir, 'streams'), ...(opts.args ?? [])],
+    { stdio: 'ignore', env: { ...process.env, ...opts.env } },
   );
   const exited = new Promise<void>((resolve) => proc.once('exit', () => resolve()));
   await waitPort(port);

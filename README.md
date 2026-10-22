@@ -228,6 +228,27 @@ or pass them as `serviceMap: { dependencies: [...] }`. Credentials in addresses 
 
 Routes come from the app's controllers (with the global prefix). Queues and topics are recorded as they are used: registered with `SnugKvQueueModule`, added to, processed by a worker, published to or subscribed to. Turn it off with `serviceMap: false`. With `tracing: true` the Map page also draws what actually happens (traffic, errors, external hosts, databases) from the traces.
 
+## Secrets
+
+Read your environment variables from the SnugKV secrets module (`-secrets-api-listen`, see `docs/SECRETS.md` in the SnugKV repo) instead of `.env` files. Load them before Nest starts, so `ConfigModule`, database factories and plain `process.env` reads all see them:
+
+```ts
+import { loadSecrets } from 'snugkv-nest';
+
+async function bootstrap() {
+  await loadSecrets({ env: 'airsig/prod' }); // SNUGKV_SECRETS_URL + SNUGKV_SECRETS_TOKEN (a read token)
+  const app = await NestFactory.create(AppModule);
+  await app.listen(3000);
+}
+```
+
+- Variables that are already set win, so a value in docker-compose still overrides a secret; `override: true` lets the secrets win.
+- `env`, `url` and `token` default to `SNUGKV_SECRETS_ENV`, `SNUGKV_SECRETS_URL` and `SNUGKV_SECRETS_TOKEN`.
+- While the API is unreachable or starting it retries for `waitMs` (default 30 s). A wrong token or an environment the token cannot read fails at once with a `SecretsError`, so the app does not start half-configured.
+- `fetchSecrets(opts)` returns the values without touching `process.env`, e.g. for `ConfigModule.forRoot({ load: [() => fetchSecrets({ env: 'airsig/prod' })] })`.
+
+Not a Node app? The `snugkv-secrets run --env airsig/prod -- your-command` binary from the SnugKV image does the same for any process.
+
 ## Messaging (streams)
 
 ## Quick start
